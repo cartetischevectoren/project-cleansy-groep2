@@ -1,0 +1,272 @@
+
+#include "mbed.h"
+
+#include "angledSonar.h"
+
+//inputs
+Sonar Sonar_LinksVoor(D2, D3, -45, -12, 12, 0);
+Sonar Sonar_Voor(D4, D5);
+Sonar Sonar_RechtsVoor(D6, D7, 45, 12, 12, 0);
+Sonar Sonar_Achter(D8, D9);
+AnalogIn IR_LinksVoor(A0);
+AnalogIn IR_Voor(A1);
+AnalogIn IR_RechtsVoor(A2);
+AnalogIn IR_RechtsAchter(A3);
+AnalogIn IR_Achter(A4);
+AnalogIn IR_LinksAchter(A5);
+
+//outputs
+PwmOut enable(D10);
+DigitalOut LV(D11);
+DigitalOut LA(D12);
+DigitalOut RV(D13);
+DigitalOut RA(D14);
+
+//vaste waardes
+#define RPM 110
+#define AANTAL_SONAR 4
+#define AANTAL_IR 6
+#define PWM_FREQ 1
+#define PWM_DUTY 1
+#define WIELDIAMETER 95.0f
+#define MIDDELPUNTSAFSTAND 17.5f
+#define BANDMIDDENAFSTAND 131.0f
+#define PI 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086513282306647093844609550582231725359408128481117450284102701938521105559644622948954930381964428810975665933446128475648233786783165271201909145648566923460348610454326648213393607260249141273724587006606315588174881520920962829254091715364367892590360011330530548820466521384146951941511609433057270365759591953092186117381932611793105118548074462379962749567351885752724891227938183011
+
+//globale variabelen
+float draaiafstand = 0.125f * PI * BANDMIDDENAFSTAND;
+float afstandpm = RPM * PI * WIELDIAMETER;
+int msec_turn = draaiafstand / afstandpm * 60000;
+float msec_turn_f = draaiafstand / afstandpm * 60000;
+
+//timers
+Timer intit;
+Timer achter;
+
+float afstandLinks()
+{
+float afstand;
+Point puntLV = Sonar_LinksVoor.getCoordinate(); //x en y van gedetecteerde object
+if(fabs(puntLV.getx()) > MIDDELPUNTSAFSTAND) {
+//er is een afstand tussen de robot en het object
+afstand = fabs(puntLV.getx() + MIDDELPUNTSAFSTAND);
+}
+else {
+//er is geen afstand tussen de robot en het object
+afstand = 0 - (puntLV.getx() + MIDDELPUNTSAFSTAND);
+}
+return afstand;
+}
+
+float afstandRechts()
+{
+float afstand;
+Point puntRV = Sonar_RechtsVoor.getCoordinate();
+afstand = puntRV.getx() - MIDDELPUNTSAFSTAND;
+return afstand;
+}
+
+float afstandVoor()
+{
+float afstand = Sonar_Voor.getDistance();
+return afstand;
+}
+
+float afstandAchter()
+{
+float afstand = Sonar_Achter.getDistance();
+return afstand;
+}
+
+bool vrij()
+{
+if(afstandLinks() <= 5 || afstandRechts() <= 5 || afstandVoor() <= 15) {
+//indien objecten gedetecteerd is het niet meer vrij
+return false;
+}
+else {
+//vrij
+return true;
+}
+}
+
+bool vrijachter()
+{
+if(afstandAchter() <= 15) {
+//achter niet vrij
+return false;
+}
+else {
+//achter vrij
+return true;
+}
+}
+
+void Rondje()
+{
+intit.reset();
+intit.start();
+//timer om te bepalen of heel rondje gereden is
+LV = 1;
+RV = 0;
+LA = 0;
+RA = 1;
+//cw rondje rijden
+}
+
+void Vooruit()
+{
+bool vV = vrij();
+while(vV == true) {
+//zolang vrij is rijd hij vooruit
+RV = 1;
+LV = 1;
+vV = vrij();
+}
+RV = 0;
+LV = 0;
+//stop
+}
+
+void Achteruit()
+{
+achter.reset();
+achter.start();
+//timer voor achteruit
+bool vA = vrijachter();
+while(vA == true && achter.read_ms() < 1000) {
+//indien vrij is en niet langer dan een seconde achteruit rijd
+LA = 1;
+RA = 1;
+vA = vrijachter();
+}
+//stop
+achter.stop();
+RA = 0;
+LA = 0;
+}
+
+void Linksaf(float sec)
+{
+bool vL = !vrij();
+//zolang het niet vrij is om te rijden moet hij draaien
+while(vL == true) {
+RV = 1;
+LA = 1;
+//draaien in stapjes
+wait_ms(sec);
+vL = !vrij();
+}
+//stop
+RV = 0;
+LA = 0;
+}
+
+void Rechtsaf(float sec)
+{
+bool vR = !vrij();
+//zolang niet vrij is draaien
+while(vR == true) {
+RA = 1;
+LV = 1;
+//draaien in stapjes
+wait_ms(sec);
+vR = !vrij();
+}
+//stop
+RA = 0;
+LV = 0;
+}
+
+int main(){
+int initialize = 0; //initializatie nog niet geweest indien anders is hij al geweest
+enable.period_ms(PWM_FREQ);
+enable.write(PWM_DUTY);
+int turn = 0; // 0 is rechts, 1 is links
+
+while(1){
+//startwaardes
+float SLinks = afstandLinks();
+float SRechts = afstandRechts();
+float SVoor = afstandVoor();
+float SAchter = afstandAchter();
+
+if(initialize == 0) {
+//initialisatie
+Rondje(); //cw rondje rijden
+bool SL, SR, SV, SA, check; //sonar check
+check = true;
+while(check) {
+printf("%f %f %f %f \r\n", afstandLinks(), afstandRechts(), afstandVoor(), afstandAchter());
+if(afstandLinks() < (SLinks - 10) || afstandLinks() > (SLinks + 10)){ SL = true; }
+if(afstandRechts() < (SRechts - 10) || afstandRechts() > (SRechts + 10)){ SR = true; }
+if(afstandVoor() < (SVoor - 10) || afstandVoor() > (SVoor + 10)){ SV = true; }
+if(afstandAchter() < (SAchter - 10) || afstandAchter() > (SAchter + 10)){ SA = true; }
+if(SL == true && SR == true && SV == true && SA == true) {
+check = false;
+}
+}
+int tijd = intit.read_ms();//heel rondje?
+while(fmod(tijd, (16 * msec_turn_f)) > 75) {
+tijd = intit.read_ms();
+wait_ms(10);
+}
+//stop
+intit.stop();
+LV = 0;
+RA = 0;
+wait_ms(100);
+//rechtsaf 90 graden
+LV = 1;
+RA = 1;
+wait_ms(msec_turn * 4 + 50);
+LV = 0;
+RA = 0;
+Vooruit();
+wait_ms(50);
+//linksaf 90 graden
+LA = 1;
+RV = 1;
+wait_ms(msec_turn * 4 + 50);
+//stop
+LA = 0;
+RV = 0;
+initialize = 1;//einde initialisatie
+
+}
+Vooruit();
+if(afstandLinks() <= 15 && afstandRechts() > 15) {
+//links geen ruimte rechts wel
+Rechtsaf(msec_turn);
+turn = 0;
+}
+else if(afstandRechts() <= 15 && afstandLinks() > 15) {
+//rechts geen ruimte links wel
+Linksaf(msec_turn);
+turn = 1;
+}
+else if(afstandLinks() <= 15 && afstandRechts() <= 15) {
+//links en rechts geen ruimte
+Achteruit();
+//180 graden draaien cw
+LV = 1;
+RA = 1;
+wait_ms(msec_turn * 8 + 50);
+//stop
+LV = 0;
+RA = 0;
+}
+else {
+if(turn == 0) {
+//indien vorige keer rechtsaf nu linksaf
+Linksaf(msec_turn);
+turn = 1;
+}
+else {
+//indien vorige keer linksaf nu rechtsaf
+Rechtsaf(msec_turn);
+turn = 0;
+}
+}
+}
+}
